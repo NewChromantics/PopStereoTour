@@ -81,7 +81,9 @@
 			canvas.height = window.innerHeight+4;
 			
 			//	change viewport so clip space is -1..1
-			gl.viewport(0, 0, canvas.width, canvas.height);
+			//	keep 1:1 ratio
+			let size = Math.max( canvas.width, canvas.height );
+			gl.viewport(0, 0, size, size);
 			
 			//	force render in case there's any gaps in animation
 			//Render();
@@ -129,8 +131,8 @@
 				gl_Position = vec4(Pos2, 0.0, 1.0);
 				uv = vec2( a_position.x, 1.0-a_position.y);
 				
-				uv.x = mix( 0.2, 1.0, uv.x );
-				uv.y = mix( 0.2, 1.0, uv.y );
+				uv.x = mix( 0.1, 1.0, uv.x );
+				uv.y = mix( 0.1, 1.0, uv.y );
 			}
 			`;
 		var FragShader = `
@@ -184,8 +186,8 @@
 				}
 				else
 				{
-					int StripeCount = 10;
-					float SpeedSclar = 4.0;
+					int StripeCount = 11;
+					float SpeedSclar = 3.0;
 					Distance += Time / SpeedSclar;
 					Distance *= float(StripeCount);
 					float Stripef = mod( Distance, float(ColourCount-1) );

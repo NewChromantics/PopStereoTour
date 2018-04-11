@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<html lang="en">
 <head>
 	<title>WebGL canvas</title>
 	<meta charset="utf-8" />
@@ -24,6 +24,26 @@
 <script>
 		
 	window.onload = main;
+
+	function GetRed(Colour)
+	{
+		let Value = parseInt( Colour.substring(0,2), 16);
+		return Value / 255;
+	}
+	
+	function GetGreen(Colour)
+	{
+		let Value = parseInt( Colour.substring(2,4), 16);
+		return Value / 255;
+	}
+	
+	function GetBlue(Colour)
+	{
+		let Value = parseInt( Colour.substring(4,6), 16);
+		return Value / 255;
+	}
+
+
 
 	function main()
 	{
@@ -62,21 +82,44 @@
 			
 			//	change viewport so clip space is -1..1
 			gl.viewport(0, 0, canvas.width, canvas.height);
+			
+			//	force render in case there's any gaps in animation
+			//Render();
 		}
 
-
+		var Time = 0;
 
 		function Render()
 		{
-			console.log("Render");
+			var Uvs = [
+				0, 0,
+				1, 0,
+				0, 1,
+				1, 1
+			];
+			Time += 1.0 / 60.0;
+			
+			var Colours = [
+			'ADFF5FFF',
+			'FFF15FFF',
+			'FFB25FFF',
+			'FF5F83FF',
+			'FF5FFFFF',
+			'C15FFFFF',
+			'865FFFFF',
+			'5F8EFFFF',
+			'5FD1FFFF',
+			'5FFFD1FF',
+			];
+			
 			// Draw the object given a set of 2D points, in this case a square
-			drawObject(gl, shaderProgram, 2, [0.333, 0.666, 0.999], [
-			0, 0,
-			1, 0,
-			0, 1,
-			1, 1
-			]);
+			drawObject(gl, shaderProgram, 2, Uvs, SdfTexture, HorseTexture, Time, Colours );
+		
+			//	rener again
+			requestAnimationFrame( Render );
 		}
+		
+		
 		var VertexShader = `
 			attribute vec2 a_position;
 			varying vec2 uv;
@@ -84,16 +127,71 @@
 			{
 				vec2 Pos2 = mix( vec2(-1,-1), vec2(1,1), a_position );
 				gl_Position = vec4(Pos2, 0.0, 1.0);
-				uv = a_position;
+				uv = vec2( a_position.x, 1.0-a_position.y);
+				
+				uv.x = mix( 0.2, 1.0, uv.x );
+				uv.y = mix( 0.2, 1.0, uv.y );
 			}
 			`;
 		var FragShader = `
-			precision mediump float;
-			uniform vec3 u_color;
+			precision highp float;
+			uniform float Time;
 			varying vec2 uv;
+			uniform sampler2D SdfTexture;
+			uniform sampler2D HorseTexture;
+			uniform int ColourCount;
+			uniform vec3 Colour0;
+			uniform vec3 Colour1;
+			uniform vec3 Colour2;
+			uniform vec3 Colour3;
+			uniform vec3 Colour4;
+			uniform vec3 Colour5;
+			uniform vec3 Colour6;
+			uniform vec3 Colour7;
+			uniform vec3 Colour8;
+			uniform vec3 Colour9;
+
+			vec3 GetColour(int Index)
+			{
+				if ( Index == 0 )	return Colour0;
+				if ( Index == 1 )	return Colour1;
+				if ( Index == 2 )	return Colour2;
+				if ( Index == 3 )	return Colour3;
+				if ( Index == 4 )	return Colour4;
+				if ( Index == 5 )	return Colour5;
+				if ( Index == 6 )	return Colour6;
+				if ( Index == 7 )	return Colour7;
+				if ( Index == 8 )	return Colour8;
+				if ( Index == 9 )	return Colour9;
+				if ( Index < 0 )
+					return vec3(1,0,1);
+				else
+					return vec3(0,1,0);
+			}
+			
 			void main()
 			{
-				gl_FragColor = vec4(uv.x, uv.y, 0, 1.0);
+				float Distance = texture2D( SdfTexture, uv ).a;
+				vec3 Colour = texture2D( HorseTexture, uv ).xyz;
+				gl_FragColor = vec4(Colour,1);
+				
+				float BorderDistance = 1.0;
+				float EdgeDistance = 0.999;
+				if ( Distance >= EdgeDistance )
+				{
+					float Blur = (Distance-EdgeDistance) / (BorderDistance-EdgeDistance);
+					gl_FragColor.xyz = mix( gl_FragColor.xyz, vec3(0,0,0), 1.0-Blur );
+				}
+				else
+				{
+					int StripeCount = 10;
+					float SpeedSclar = 4.0;
+					Distance += Time / SpeedSclar;
+					Distance *= float(StripeCount);
+					float Stripef = mod( Distance, float(ColourCount-1) );
+					int Stripe = int(Stripef);
+					gl_FragColor.xyz = GetColour( Stripe );
+				}
 			}
 			`;
 
@@ -105,6 +203,11 @@
 		// Setup the shader program with the vertex shader and the fragment shader
 		var shaderProgram = buildShaderProgram(gl,VertexShader,FragShader);
 		gl.useProgram(shaderProgram);
+
+		var SdfUrl = 'http://electric.horse/horse_sdf.png';
+		var HorseUrl = 'http://electric.horse/horse.jpg';
+		var SdfTexture = loadTexture(gl,SdfUrl);
+		var HorseTexture = loadTexture(gl,HorseUrl);
 
 		ResizeCanvas();
 		Render();
@@ -144,10 +247,80 @@
 		}
 		return prog;
 	}
+	
+	function loadTexture(gl, url)
+	{
+		const texture = gl.createTexture();
+		gl.bindTexture(gl.TEXTURE_2D, texture);
+		
+		// Because images have to be download over the internet
+		// they might take a moment until they are ready.
+		// Until then put a single pixel in the texture so we can
+		// use it immediately. When the image has finished downloading
+		// we'll update the texture with the contents of the image.
+		const level = 0;
+		const internalFormat = gl.RGBA;
+		const width = 1;
+		const height = 1;
+		const border = 0;
+		const srcFormat = gl.RGBA;
+		const srcType = gl.UNSIGNED_BYTE;
+		const pixel = new Uint8Array([255, 0, 255, 255]);  // opaque blue
+		gl.texImage2D(gl.TEXTURE_2D, level, internalFormat,
+		width, height, border, srcFormat, srcType,
+		pixel);
+		
+		const image = new Image();
+		image.crossOrigin = "anonymous";
+		image.onload = function()
+		{
+			console.log("Loaded image " + image.src);
+			gl.bindTexture(gl.TEXTURE_2D, texture);
+			gl.texImage2D(gl.TEXTURE_2D, level, internalFormat,	srcFormat, srcType, image);
+			
+			// WebGL1 has different requirements for power of 2 images
+			// vs non power of 2 images so check if the image is a
+			// power of 2 in both dimensions.
+			// No, it's not a power of 2. Turn of mips and set
+			// wrapping to clamp to edge
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+		};
+		
+		image.src = url;
+		
+		return texture;
+	}
 
 	// Draw an object given a shader program and a list of vertices
-	function drawObject(gl, shaderProgram, coordDimensions, objColor, vertexCoords)
+	function drawObject(gl, shaderProgram, coordDimensions, vertexCoords, SdfTexture, HorseTexture, Time, Colours )
 	{
+		let SdfUniform = gl.getUniformLocation(shaderProgram, 'SdfTexture');
+		let HorseUniform = gl.getUniformLocation(shaderProgram, 'HorseTexture');
+		let PositionUniform = gl.getAttribLocation(shaderProgram, "a_position");
+		let TimeUniform = gl.getUniformLocation(shaderProgram, "Time");
+
+		//	setup textures
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, SdfTexture);
+		gl.uniform1i(SdfUniform, 0);
+		
+		gl.activeTexture(gl.TEXTURE1);
+		gl.bindTexture(gl.TEXTURE_2D, HorseTexture);
+		gl.uniform1i(HorseUniform, 1);
+
+		let ColourCountUniform = gl.getUniformLocation(shaderProgram, "ColourCount");
+		gl.uniform1i(ColourCountUniform, Colours.length);
+		
+		//	gr; can't use less than with this xml html
+		for ( let i=0;	i<Colours.length;	i++ )
+		{
+			let ColourUniform = gl.getUniformLocation(shaderProgram, "Colour" + i );
+			gl.uniform3f(ColourUniform, GetRed(Colours[i]), GetGreen(Colours[i]), GetBlue(Colours[i]) );
+		}
+
+
 		// Create a buffer and put a single clipspace rectangle in it (2 triangles)
 		var buffer = gl.createBuffer();
 		gl.bindBuffer(gl.ARRAY_BUFFER, buffer);// Set this buffer as the current one for the next buffer operations
@@ -160,11 +333,10 @@
 		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexCoords), gl.STATIC_DRAW);
 		// Get a reference to the "a_position" variable of the vertex shader,
 		// which we'll connect with the 3D vertex data now stored in the current WebGL buffer.
-		var sh_position = gl.getAttribLocation(shaderProgram, "a_position");
 		// Enable the a_position vertex attribute for rendering
 		// All client-side capabilities are disabled by default,
 		// including all vertex attribute arrays.
-		gl.enableVertexAttribArray(sh_position);
+		gl.enableVertexAttribArray(PositionUniform);
 		// Specify the data structure of the array that will be used to store the vertex position data.
 		// The parameters indicate that the vertexPos attribute is:
 		// - a list of elements with 2 components each (2D vertices) 
@@ -174,11 +346,10 @@
 		// The first specifies the stride of the data i.e. the amount of storage allocated to each element
 		// and the second specifies the offset i.e. where the data starts.
 		// For standard JavaScript arrays both are set to zero to indicate tight packing and no offset.
-		gl.vertexAttribPointer(sh_position, coordDimensions, gl.FLOAT, false, 0, 0);
-		// Get a reference to the "u_color" variable of the vertex shader,
-		// which we'll connect with the color parameter sent to this function
-		var sh_color = gl.getUniformLocation(shaderProgram, "u_color");
-		gl.uniform3f(sh_color, objColor[0], objColor[1], objColor[2]);
+		gl.vertexAttribPointer(PositionUniform, coordDimensions, gl.FLOAT, false, 0, 0);
+		
+		gl.uniform1f(TimeUniform, Time);
+		
 		// Set black as the background color
 		gl.clearColor(0, 0, 0, 1); // defaults to white (1,1,1)
 		// Manually clear the canvas.

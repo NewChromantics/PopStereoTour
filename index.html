@@ -131,8 +131,8 @@
 				gl_Position = vec4(Pos2, 0.0, 1.0);
 				uv = vec2( a_position.x, 1.0-a_position.y);
 				
-				uv.x = mix( 0.1, 1.0, uv.x );
-				uv.y = mix( 0.1, 1.0, uv.y );
+				uv.x = mix( 0.0, 1.0, uv.x );
+				uv.y = mix( 0.0, 1.0, uv.y );
 			}
 			`;
 		var FragShader = `

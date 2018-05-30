@@ -49,10 +49,11 @@ uniform sampler2D Texture;
 uniform mat4 ViewToScreenMatrix;
 uniform mat4 ScreenToViewMatrix;
 #define UNITY_PI 3.1415926535897932384626433832795
+uniform vec4 PanoMinMax;
 
 float atan2(float x,float y)
 {
-	return atan(y,x);
+	return atan(x,y);
 }
 
 vec2 ViewToEquirect(vec3 View3)
@@ -63,34 +64,62 @@ vec2 ViewToEquirect(vec3 View3)
 	return uv;
 }
 
+vec3 GetUvColour(vec2 uv)
+{
+	if ( uv.x < 0.0 || uv.y < 0.0 )
+		return vec3( 0, 0, 1 );
+	if ( uv.x > 1.0 || uv.y > 1.0 )
+		return vec3( 1, 0, 1 );
+		
+	vec2 Edge = uv * 40.0;
+	Edge = fract(Edge);
+	if ( Edge.x < 0.1 )
+		return vec3(1,1,1);
+	if ( Edge.y < 0.1 )
+		return vec3(1,1,1);
+
+	return vec3( uv, 0 );
+}
+
+vec2 ScaleMinMax(vec2 uv,vec4 MinMax)
+{
+	float u = mix( MinMax.x, MinMax.z, uv.x );
+	float v = mix( MinMax.y, MinMax.w, uv.y );
+	return vec2(u,v);
+}
+
 void main()
 {
 	//	projection space is -1..1
-	vec2 Screen2 = mix( vec2(-1,-1), vec2(1,1), uv );
-	vec4 Screen = vec4( Screen2, 1, 0 );
+	vec2 Screen2 = mix( vec2(-1,1), vec2(1,-1), uv );
+	//vec2 Screen2 = mix( vec2(0,0), vec2(1,1), uv );
+	float Zoom = 1.0;
+	vec4 Screen = vec4( Screen2, Zoom, 0 );
 	
 	//vec4 View4 = ScreenToViewMatrix * Screen;
-	vec4 View4 = ViewToScreenMatrix * Screen;
-	//vec3 View3 = View4.xyz / View4.w;
-	vec3 View3 = View4.xyz;
+	vec4 View4 = Screen * ViewToScreenMatrix ;
+	vec3 View3 = View4.xyz / View4.w;
+	//vec3 View3 = View4.xyz;
 	
 	vec2 EquirectUv = ViewToEquirect( View3 );
+	EquirectUv = ScaleMinMax( EquirectUv, PanoMinMax );
 	gl_FragColor = texture2D( Texture, EquirectUv );
+	//gl_FragColor = vec4( GetUvColour(EquirectUv), 1 );
 }
 `;
 
 function TCamera()
 {
-	this.VerticalFieldOfView = 45;
-	this.NearClipDistance = 0.01;
+	this.VerticalFieldOfView = 100;
+	this.NearClipDistance = 1.0;
 	this.FarClipDistance = 100.0;
 	this.RotationEularDegrees = new float3(0,0,0);
 	this.Translation = new float3(0,0,0);
 
 	this.GetViewToScreenMatrix = function(RenderTarget)
 	{
-		let w = RenderTarget.GetWidth();
-		let h = RenderTarget.GetHeight();
+		let w = RenderTarget.GetViewportWidth();
+		let h = RenderTarget.GetViewportHeight();
 		let aspect = w/h;
 		let vfov = Math.radians( this.VerticalFieldOfView );
 		
@@ -98,7 +127,9 @@ function TCamera()
 		mat4.perspective( pm.Values, vfov, aspect, this.NearClipDistance, this.FarClipDistance );
 		
 		let YawRadians = Math.radians( this.RotationEularDegrees.y );
+		let PitchRadians = Math.radians( this.RotationEularDegrees.x );
 		mat4.rotateY( pm.Values, pm.Values, YawRadians );
+		mat4.rotateX( pm.Values, pm.Values, PitchRadians );
 		return pm;
 	}
 	
@@ -110,6 +141,22 @@ function TCamera()
 	}
 }
 
+const MinMax_Full = new float4(0,0,1,1);
+const MinMax_Left = new float4(0,0,0.5,1.0);
+const MinMax_Right = new float4(0.5,0,1.0,1.0);
+const MinMax_Top = new float4(0,0,1,0.5);
+const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
+
+	function GetPanoMinMaxUvsFromFilename(Filename)
+	{
+		//	mike's _s is top/bottom
+		if ( Filename.endsWith('_s') )
+		{
+			return [ MinMax_Top, MinMax_Bottom ];
+		}
+		
+		return [ MinMax_Full ];
+	}
 
 
 	window.onload = main;
@@ -118,7 +165,9 @@ function TCamera()
 	{
 		var Canvas = document.getElementById('glcanvas');
 		var Context = new TContext( Canvas );
-		var Screen = new TScreen( Canvas );
+		var ScreenLeft = new TScreen( Canvas, MinMax_Left );
+		var ScreenRight = new TScreen( Canvas, MinMax_Right );
+		var ScreenFull = new TScreen( Canvas );
 
 //	force 1:1 ratio
 		Screen.GetWidth = function()
@@ -143,28 +192,48 @@ function TCamera()
 		ResizeCanvas();
 		
 		let ClearColour = new float4(0,0,0,1);
-		let PanoUrl = 'http://stereo360.newchromantics.com.s3-website-us-west-2.amazonaws.com/Images/cam1.jpg';
+		let PanoUrl = 'http://stereo360.newchromantics.com/Images/cam1_s.jpg';
+		//let PanoUrl = 'http://stereo360.newchromantics.com/Images/Test360.jpg';
 		let PanoTexture = new TTexture('Pano',PanoUrl);
 		let Stereo360Blitter = new TBlitter('Blitter', FragShader_Stereo360 );
 		let Camera = new TCamera();
 
 		let SetStereoUniforms = function(Shader,Geo,RenderTarget)
 		{
+			let PanoUvs = GetPanoMinMaxUvsFromFilename( PanoTexture.GetFilenameNoExtension() );
+			let PanoMinMax = PanoUvs[0];
+			if ( RenderTarget == ScreenRight )
+				PanoMinMax = PanoUvs[PanoUvs.length-1];
+			
 			let ViewToScreenMatrix = Camera.GetViewToScreenMatrix(RenderTarget);
 			let ScreenToViewMatrix = Camera.GetScreenToViewMatrix(RenderTarget);
 			Shader.SetUniform( 'ViewToScreenMatrix', ViewToScreenMatrix );
 			Shader.SetUniform( 'ScreenToViewMatrix', ScreenToViewMatrix );
 			Shader.SetUniform( 'Texture', PanoTexture );
-			Shader.SetUniform( 'ViewForward', new float3(0,0,1) );
+			Shader.SetUniform( 'PanoMinMax', PanoMinMax );
 		};
 		
-
+		var Time = 0;
 		function Render()
 		{
+			Time += 1.0 / 60.0;
+			//Camera.RotationEularDegrees.x = Math.sin( Time ) * 10;
 			Camera.RotationEularDegrees.y += 0.2;
+			
+			let PanoUvs = GetPanoMinMaxUvsFromFilename( PanoTexture.GetFilenameNoExtension() );
+			let RenderStereo = PanoUvs.length > 1;
+			
 			try
 			{
-				Stereo360Blitter.Render( Screen, SetStereoUniforms );
+				if ( RenderStereo )
+				{
+					Stereo360Blitter.Render( ScreenLeft, SetStereoUniforms );
+					Stereo360Blitter.Render( ScreenRight, SetStereoUniforms );
+				}
+				else
+				{
+					Stereo360Blitter.Render( ScreenFull, SetStereoUniforms );
+				}
 			}
 			catch(Exception)
 			{

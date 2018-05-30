@@ -20,13 +20,15 @@
 <body>
 	<script src="PopWebgl/PopGl.js"></script>
 	<script src="PopWebgl/PopBlitter.js"></script>
+	<script src="PopWebgl/gl-matrix-min.js"></script>
+	
 	<canvas id="glcanvas" width="100" height="100">
 		Your browser doesn't appear to support the HTML5 <code>&lt;canvas&gt;</code> element.
 	</canvas>
 <script>
 
 
-var VertexShader = `
+var VertexShader_Stereo360 = `
 attribute vec2 a_position;
 varying vec2 uv;
 void main()
@@ -40,78 +42,75 @@ void main()
 }
 `;
 
-var FragShader_SdfHorse = `
+var FragShader_Stereo360 = `
 precision highp float;
-uniform float Time;
 varying vec2 uv;
-uniform sampler2D SdfTexture;
-uniform sampler2D HorseTexture;
-uniform int ColourCount;
-uniform vec4 Colour0;
-uniform vec4 Colour1;
-uniform vec4 Colour2;
-uniform vec4 Colour3;
-uniform vec4 Colour4;
-uniform vec4 Colour5;
-uniform vec4 Colour6;
-uniform vec4 Colour7;
-uniform vec4 Colour8;
-uniform vec4 Colour9;
+uniform sampler2D Texture;
+uniform mat4 ViewToScreenMatrix;
+uniform mat4 ScreenToViewMatrix;
+#define UNITY_PI 3.1415926535897932384626433832795
 
-vec4 GetColour(int Index)
+float atan2(float x,float y)
 {
-	if ( Index == 0 )	return Colour0;
-	if ( Index == 1 )	return Colour1;
-	if ( Index == 2 )	return Colour2;
-	if ( Index == 3 )	return Colour3;
-	if ( Index == 4 )	return Colour4;
-	if ( Index == 5 )	return Colour5;
-	if ( Index == 6 )	return Colour6;
-	if ( Index == 7 )	return Colour7;
-	if ( Index == 8 )	return Colour8;
-	if ( Index == 9 )	return Colour9;
-	if ( Index < 0 )
-		return vec4(1,0,1,1);
-	else
-		return vec4(0,1,0,1);
+	return atan(y,x);
+}
+
+vec2 ViewToEquirect(vec3 View3)
+{
+	View3 = normalize(View3);
+	vec2 longlat = vec2(atan2(View3.x, View3.z) + UNITY_PI, acos(-View3.y));
+	vec2 uv = longlat / vec2(2.0 * UNITY_PI, UNITY_PI);
+	return uv;
 }
 
 void main()
 {
-	float Distance = texture2D( SdfTexture, uv ).a;
-	vec3 Colour = texture2D( HorseTexture, uv ).xyz;
-	gl_FragColor = vec4(Colour,1);
+	//	projection space is -1..1
+	vec2 Screen2 = mix( vec2(-1,-1), vec2(1,1), uv );
+	vec4 Screen = vec4( Screen2, 1, 0 );
 	
-	float BorderDistance = 1.0;
-	float EdgeDistance = 0.999;
-	if ( Distance >= EdgeDistance )
-	{
-		float Blur = (Distance-EdgeDistance) / (BorderDistance-EdgeDistance);
-		gl_FragColor.xyz = mix( gl_FragColor.xyz, vec3(0,0,0), 1.0-Blur );
-	}
-	else
-	{
-		int StripeCount = 11;
-		float SpeedSclar = 3.0;
-		Distance += Time / SpeedSclar;
-		Distance *= float(StripeCount);
-		float Stripef = mod( Distance, float(ColourCount-1) );
-		int Stripe = int(Stripef);
-		gl_FragColor.xyz = GetColour( Stripe ).xyz;
-	}
+	//vec4 View4 = ScreenToViewMatrix * Screen;
+	vec4 View4 = ViewToScreenMatrix * Screen;
+	//vec3 View3 = View4.xyz / View4.w;
+	vec3 View3 = View4.xyz;
+	
+	vec2 EquirectUv = ViewToEquirect( View3 );
+	gl_FragColor = texture2D( Texture, EquirectUv );
 }
 `;
 
-
-var FragShader_Copy = `
-precision highp float;
-varying vec2 uv;
-uniform sampler2D ColourTexture;
-void main()
+function TCamera()
 {
-	gl_FragColor = texture2D( ColourTexture, vec2( uv.x, 1.0-uv.y) );
+	this.VerticalFieldOfView = 45;
+	this.NearClipDistance = 0.01;
+	this.FarClipDistance = 100.0;
+	this.RotationEularDegrees = new float3(0,0,0);
+	this.Translation = new float3(0,0,0);
+
+	this.GetViewToScreenMatrix = function(RenderTarget)
+	{
+		let w = RenderTarget.GetWidth();
+		let h = RenderTarget.GetHeight();
+		let aspect = w/h;
+		let vfov = Math.radians( this.VerticalFieldOfView );
+		
+		let pm = new Matrix4x4();
+		mat4.perspective( pm.Values, vfov, aspect, this.NearClipDistance, this.FarClipDistance );
+		
+		let YawRadians = Math.radians( this.RotationEularDegrees.y );
+		mat4.rotateY( pm.Values, pm.Values, YawRadians );
+		return pm;
+	}
+	
+	this.GetScreenToViewMatrix = function(RenderTarget)
+	{
+		let ViewToScreen = this.GetViewToScreenMatrix(RenderTarget);
+		ViewToScreen.Invert();
+		return ViewToScreen;
+	}
 }
-`;
+
+
 
 	window.onload = main;
 
@@ -142,58 +141,30 @@ void main()
 		// resize the canvas to fill browser window dynamically
 		window.addEventListener('resize', ResizeCanvas, false);
 		ResizeCanvas();
-
-		var Time = 0;
-		
-		
-		let HorseSdfShader = new TShader("Sdf", VertexShader, FragShader_SdfHorse );
-		
-		let SdfUrl = 'http://electric.horse/horse_sdf.png';
-		let HorseUrl = 'http://electric.horse/horse.jpg';
-		let SdfTexture = new TTexture("sdf",SdfUrl);
-		let HorseTexture = new TTexture("Horse",HorseUrl);
 		
 		let ClearColour = new float4(0,0,0,1);
+		let PanoUrl = 'http://stereo360.newchromantics.com.s3-website-us-west-2.amazonaws.com/Images/cam1.jpg';
+		let PanoTexture = new TTexture('Pano',PanoUrl);
+		let Stereo360Blitter = new TBlitter('Blitter', FragShader_Stereo360 );
+		let Camera = new TCamera();
 
-		var Colours =
-		[
-		HexToColour4('ADFF5FFF'),
-		HexToColour4('FFF15FFF'),
-		HexToColour4('FFB25FFF'),
-		HexToColour4('FF5F83FF'),
-		HexToColour4('FF5FFFFF'),
-		HexToColour4('C15FFFFF'),
-		HexToColour4('865FFFFF'),
-		HexToColour4('5F8EFFFF'),
-		HexToColour4('5FD1FFFF'),
-		HexToColour4('5FFFD1FF')
-		];
-		 
-		let HorseBlitter = new TBlitter("HorseBlitter", FragShader_SdfHorse );
-
-		let SetHorseUniforms = function(Shader,Geo)
+		let SetStereoUniforms = function(Shader,Geo,RenderTarget)
 		{
-			Shader.SetUniform( 'HorseTexture', HorseTexture );
-			Shader.SetUniform( 'SdfTexture', SdfTexture );
-			Shader.SetUniformFloat('Time', Time);
-			Shader.SetUniformInt( 'ColourCount', Colours.length );
-			
-			//	gr; can't use less than with this xml html
-			for ( let i=0;	i<Colours.length;	i++ )
-			{
-				let ColourUniform = "Colour" + i;
-				Shader.SetUniform( ColourUniform, Colours[i] );
-			}
+			let ViewToScreenMatrix = Camera.GetViewToScreenMatrix(RenderTarget);
+			let ScreenToViewMatrix = Camera.GetScreenToViewMatrix(RenderTarget);
+			Shader.SetUniform( 'ViewToScreenMatrix', ViewToScreenMatrix );
+			Shader.SetUniform( 'ScreenToViewMatrix', ScreenToViewMatrix );
+			Shader.SetUniform( 'Texture', PanoTexture );
+			Shader.SetUniform( 'ViewForward', new float3(0,0,1) );
 		};
 		
 
 		function Render()
 		{
-			Time += 1.0 / 60.0;
-			
+			Camera.RotationEularDegrees.y += 0.2;
 			try
 			{
-				HorseBlitter.Render( Screen, SetHorseUniforms );
+				Stereo360Blitter.Render( Screen, SetStereoUniforms );
 			}
 			catch(Exception)
 			{

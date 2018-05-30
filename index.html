@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-	<title>nay way Jose</title>
+	<title>360 Viewer</title>
 	<meta charset="utf-8" />
 	
 	<style type="text/css">
@@ -160,6 +160,8 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 
 
 	window.onload = main;
+	
+	
 
 	function main()
 	{
@@ -191,12 +193,58 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		window.addEventListener('resize', ResizeCanvas, false);
 		ResizeCanvas();
 		
+		
 		let ClearColour = new float4(0,0,0,1);
 		let PanoUrl = 'http://stereo360.newchromantics.com/Images/cam1_s.jpg';
 		//let PanoUrl = 'http://stereo360.newchromantics.com/Images/Test360.jpg';
 		let PanoTexture = new TTexture('Pano',PanoUrl);
 		let Stereo360Blitter = new TBlitter('Blitter', FragShader_Stereo360 );
 		let Camera = new TCamera();
+
+		function LoadPanoImage(Url,Name)
+		{
+			PanoTexture.Load(Url,Name);
+		}
+
+		//	enable drag & drop
+		function OnDropFile(evt)
+		{
+			evt.stopPropagation();
+			evt.preventDefault();
+			
+			var files = evt.dataTransfer.files; // FileList object.
+			
+			for (var i = 0, f; f = files[i]; i++)
+			{
+				var reader = new FileReader();
+				console.log(f);
+				let Filename = f.name;
+				
+				var OnLoadImageFile = function(e)
+				{
+					var DataUri = e.target.result;
+					console.log(e);
+					LoadPanoImage(DataUri,Filename);
+				};
+				reader.onload = OnLoadImageFile;
+				reader.readAsDataURL(f);
+			}
+		}
+		
+		function OnDragOver(evt)
+		{
+			evt.stopPropagation();
+			evt.preventDefault();
+			evt.dataTransfer.dropEffect = 'copy';
+		}
+		
+		let DropElement = Canvas;
+		DropElement.addEventListener('dragover', OnDragOver, false);
+		DropElement.addEventListener('drop', OnDropFile, false);
+
+
+
+
 
 		let SetStereoUniforms = function(Shader,Geo,RenderTarget)
 		{

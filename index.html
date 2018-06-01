@@ -15,13 +15,29 @@
 		padding:			0px;
 		overflow:			hidden;
 		}
+	
+	#GyroDebug
+	{
+		padding:	1vmin;
+		background:	#fff;
+		position:	absolute;
+		top:		0vmin;
+		left:		10vmin;
+		right:		90vmin;
+		height:		10vmin;
+		width:		80vmin;
+		font-size:	8vmin;
+	}
+	
 	</style>
 </head>
 <body>
 	<script src="PopWebgl/PopGl.js"></script>
 	<script src="PopWebgl/PopBlitter.js"></script>
-	<script src="PopWebgl/gl-matrix-min.js"></script>
-	
+	<script src="PopWebgl/gl-matrix.js"></script>
+	<script src="PopWebgl/PopMath.js"></script>
+
+	<div id=GyroDebug>Gyro.</div>
 	<canvas id="glcanvas" width="100" height="100">
 		Your browser doesn't appear to support the HTML5 <code>&lt;canvas&gt;</code> element.
 	</canvas>
@@ -48,6 +64,8 @@ varying vec2 uv;
 uniform sampler2D Texture;
 uniform mat4 ViewToScreenMatrix;
 uniform mat4 ScreenToViewMatrix;
+uniform mat4 ViewToWorldMatrix;
+uniform mat4 WorldToViewMatrix;
 #define UNITY_PI 3.1415926535897932384626433832795
 uniform vec4 PanoMinMax;
 
@@ -97,7 +115,8 @@ void main()
 	vec4 Screen = vec4( Screen2, Zoom, 0 );
 	
 	//vec4 View4 = ScreenToViewMatrix * Screen;
-	vec4 View4 = Screen * ViewToScreenMatrix ;
+	mat4 ScreenToWorldMatrix = ViewToScreenMatrix * ViewToWorldMatrix;
+	vec4 View4 = Screen * ScreenToWorldMatrix;
 	vec3 View3 = View4.xyz / View4.w;
 	//vec3 View3 = View4.xyz;
 	
@@ -113,7 +132,7 @@ function TCamera()
 	this.VerticalFieldOfView = 100;
 	this.NearClipDistance = 1.0;
 	this.FarClipDistance = 100.0;
-	this.RotationEularDegrees = new float3(0,0,0);
+	//this.RotationEularDegrees = new float3(0,0,0);
 	this.Translation = new float3(0,0,0);
 
 	this.GetViewToScreenMatrix = function(RenderTarget)
@@ -125,11 +144,13 @@ function TCamera()
 		
 		let pm = new Matrix4x4();
 		mat4.perspective( pm.Values, vfov, aspect, this.NearClipDistance, this.FarClipDistance );
-		
+
+/*
 		let YawRadians = Math.radians( this.RotationEularDegrees.y );
 		let PitchRadians = Math.radians( this.RotationEularDegrees.x );
 		mat4.rotateY( pm.Values, pm.Values, YawRadians );
 		mat4.rotateX( pm.Values, pm.Values, PitchRadians );
+ */
 		return pm;
 	}
 	
@@ -139,6 +160,11 @@ function TCamera()
 		ViewToScreen.Invert();
 		return ViewToScreen;
 	}
+}
+
+function IsLandscape()
+{
+	return window.innerWidth > window.innerHeight;
 }
 
 const MinMax_Full = new float4(0,0,1,1);
@@ -160,8 +186,103 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 
 
 	window.onload = main;
-	
-	
+
+	function TCameraController(InputElement)
+	{
+		this.InputElement = InputElement;
+		this.LastGyroRotation = null;	//	quaternion
+		this.LastGyroEuler = null;
+
+		this.GetRotation = function()
+		{
+			return this.GetGryoRotation();
+		}
+		
+		this.GetPhoneUnrotation = function()
+		{
+			/*
+			if ( this.IsRotatedPortrait() )
+			{
+				//	forced portrait needs to rotate phone around roll
+				PhoneRotation.setFromAxisAngle( new THREE.Vector3(0,0,1), Math.radians(90) );
+			}
+			 */
+			//	unrotate the phone to make gyro relative
+			return new Quaternion();
+		}
+		
+		this.GetGryoRotation = function()
+		{
+			if ( this.LastGyroRotation == null )
+				return new Quaternion();
+		
+			let Rotation = new Quaternion();
+			Rotation.Copy( this.LastGyroRotation );
+			Rotation.Multiply( this.GetPhoneUnrotation() );
+			return Rotation;
+		}
+		
+		this.OnGyroChanged = function(Event)
+		{
+			//	https://developer.mozilla.org/en-US/docs/Web/API/Detecting_device_orientation
+			let Roll = Event.alpha || 0;	//	Z 0 .. 360
+			let Pitch = Event.beta || 0;	//	X -180 .. 180
+			let Yaw = Event.gamma || 0;	//	Y -90 .. 90
+			
+			//	landscape left on ios
+			//this.LastGyroEuler = new float3( Yaw, -Roll, 0 );
+			this.LastGyroEuler = new float3( Pitch, Yaw, Roll );
+			
+			
+			//euler.set( Math.radians(Pitch), Math.radians(Roll), -Math.radians(Yaw), 'YXZ' );
+			this.LastGyroRotation = new Quaternion();
+			this.LastGyroRotation.FromEular(this.LastGyroEuler);
+			let PitchChange = new Quaternion();
+			//if ( IsLandscape() )
+				PitchChange.FromEular( new float3(-90,0,0) );
+			this.LastGyroRotation.Multiply( PitchChange );
+			
+			//	portrait
+			//	todo
+			
+			/* old setup
+			//	'ZXY' for the device, but 'YXZ' for us
+			//this.LastGyroEuler = new float3( Pitch, Roll, -Yaw );
+			this.LastGyroEuler = new float3( Pitch, Yaw, 0 );
+			//euler.set( Math.radians(Pitch), Math.radians(Roll), -Math.radians(Yaw), 'YXZ' );
+			this.LastGyroRotation = new Quaternion();
+			this.LastGyroRotation.FromEular(this.LastGyroEuler);
+			
+			//let PitchChange = Quaternion.FromAxisAngle( new float3(1,0,0), -90 );
+			//this.LastGyroRotation.Multiply( PitchChange );
+			 */
+		}
+		
+		this.EnableGyro = function()
+		{
+			this.LastGyroRotation = new Quaternion();
+			//this.LastGyroRotation.FromEular( new float3(30,30,0) );
+			
+			if ( !window.DeviceOrientationEvent )
+			{
+				//	no gyro
+			}
+				
+			window.addEventListener( 'deviceorientation', this.OnGyroChanged.bind(this), false );
+		}
+
+		this.EnableGyro();
+	}
+
+	function SetElementText(Element,Text)
+	{
+		if ( typeof Element == "string" )
+			Element = document.getElementById(Element);
+		if ( Element == null )
+			return;
+			
+		Element.innerText = Text;
+	}
 
 	function main()
 	{
@@ -170,6 +291,16 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		var ScreenLeft = new TScreen( Canvas, MinMax_Left );
 		var ScreenRight = new TScreen( Canvas, MinMax_Right );
 		var ScreenFull = new TScreen( Canvas );
+		var CameraController = new TCameraController( Canvas );
+
+		let UpdateGyroText = function()
+		{
+			let GyroEular = CameraController.LastGyroEuler;
+			if ( GyroEular == null )
+				SetElementText('GyroDebug','null gyro');
+			else
+				SetElementText('GyroDebug', GyroEular.x.toFixed(2) + ', ' + GyroEular.y.toFixed(2) + ', ' + GyroEular.z.toFixed(2) );
+		}
 
 //	force 1:1 ratio
 		Screen.GetWidth = function()
@@ -253,10 +384,15 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 			if ( RenderTarget == ScreenRight )
 				PanoMinMax = PanoUvs[PanoUvs.length-1];
 			
+			let ViewToWorldMatrix = CameraController.GetRotation().GetMatrix4x4();
+			let WorldToViewMatrix = ViewToWorldMatrix.GetInverse();
+			
 			let ViewToScreenMatrix = Camera.GetViewToScreenMatrix(RenderTarget);
 			let ScreenToViewMatrix = Camera.GetScreenToViewMatrix(RenderTarget);
 			Shader.SetUniform( 'ViewToScreenMatrix', ViewToScreenMatrix );
 			Shader.SetUniform( 'ScreenToViewMatrix', ScreenToViewMatrix );
+			Shader.SetUniform( 'ViewToWorldMatrix', ViewToWorldMatrix );
+			Shader.SetUniform( 'WorldToViewMatrix', WorldToViewMatrix );
 			Shader.SetUniform( 'Texture', PanoTexture );
 			Shader.SetUniform( 'PanoMinMax', PanoMinMax );
 		};
@@ -264,12 +400,14 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		var Time = 0;
 		function Render()
 		{
+			UpdateGyroText();
 			Time += 1.0 / 60.0;
 			//Camera.RotationEularDegrees.x = Math.sin( Time ) * 10;
-			Camera.RotationEularDegrees.y += 0.2;
+			//Camera.RotationEularDegrees.y += 0.2;
 			
 			let PanoUvs = GetPanoMinMaxUvsFromFilename( PanoTexture.GetFilenameNoExtension() );
-			let RenderStereo = PanoUvs.length > 1;
+			//let RenderStereo = PanoUvs.length > 1;
+			let RenderStereo = IsLandscape();
 			
 			try
 			{

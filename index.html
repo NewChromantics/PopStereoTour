@@ -36,6 +36,8 @@
 	<script src="PopWebgl/PopBlitter.js"></script>
 	<script src="PopWebgl/gl-matrix.js"></script>
 	<script src="PopWebgl/PopMath.js"></script>
+	<script src="PopWebgl//gyronorm.complete.js"></script>
+	
 
 	<div id=GyroDebug>Gyro.</div>
 	<canvas id="glcanvas" width="100" height="100">
@@ -115,7 +117,10 @@ void main()
 	vec4 Screen = vec4( Screen2, Zoom, 0 );
 	
 	//vec4 View4 = ScreenToViewMatrix * Screen;
-	mat4 ScreenToWorldMatrix = ViewToScreenMatrix * ViewToWorldMatrix;
+	//mat4 ScreenToWorldMatrix = ViewToScreenMatrix * ViewToWorldMatrix;
+	//mat4 ScreenToWorldMatrix = ViewToWorldMatrix * ViewToScreenMatrix;
+	//mat4 ScreenToWorldMatrix = WorldToViewMatrix * ViewToScreenMatrix;
+	mat4 ScreenToWorldMatrix = ViewToScreenMatrix * WorldToViewMatrix;
 	vec4 View4 = Screen * ScreenToWorldMatrix;
 	vec3 View3 = View4.xyz / View4.w;
 	//vec3 View3 = View4.xyz;
@@ -192,6 +197,8 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		this.InputElement = InputElement;
 		this.LastGyroRotation = null;	//	quaternion
 		this.LastGyroEuler = null;
+		this.Gyro = null;
+
 
 		this.GetRotation = function()
 		{
@@ -237,10 +244,19 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 			//euler.set( Math.radians(Pitch), Math.radians(Roll), -Math.radians(Yaw), 'YXZ' );
 			this.LastGyroRotation = new Quaternion();
 			this.LastGyroRotation.FromEular(this.LastGyroEuler);
+			
+			/*
 			let PitchChange = new Quaternion();
 			//if ( IsLandscape() )
 				PitchChange.FromEular( new float3(-90,0,0) );
 			this.LastGyroRotation.Multiply( PitchChange );
+			*/
+			let PitchChange = 0;
+			let YawChange = 0;
+			let RollChange = 0;
+			this.LastGyroRotation.RotateX( PitchChange );
+			this.LastGyroRotation.RotateY( YawChange );
+			this.LastGyroRotation.RotateZ( RollChange );
 			
 			//	portrait
 			//	todo
@@ -271,7 +287,50 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 			window.addEventListener( 'deviceorientation', this.OnGyroChanged.bind(this), false );
 		}
 
-		this.EnableGyro();
+		this.OnGyroData = function(data)
+		{
+			let Pitch = data.do.alpha;
+			let Yaw = data.do.beta;
+			let Roll = data.do.gamma;
+			this.LastGyroEuler = new float3( Pitch, Yaw, Roll );
+			this.LastGyroRotation = new Quaternion();
+			this.LastGyroRotation.FromEular(this.LastGyroEuler);
+			
+		}
+
+		this.EnableGyroNorm = function()
+		{
+			var Args = {
+				logger: console.log,
+				orientationBase:GyroNorm.GAME,
+			};
+			
+			let This = this;
+			let OnGyroInitialised = function()
+			{
+				This.LastGyroEuler = new float3(2,2,2);
+				let Callback = function(data)
+				{
+					This.LastGyroEuler = new float3(4,4,4);
+					This.OnGyroData( data );
+				}
+				This.Gyro.start( Callback );
+			};
+			
+			let OnGyroError = function(e)
+			{
+				console.log(e);
+			}
+			
+			this.LastGyroEuler = new float3(1,1,1);
+			this.Gyro = new GyroNorm();
+			this.LastGyroEuler = new float3(3,3,3);
+			this.Gyro.init(Args).then( OnGyroInitialised ).catch( OnGyroError);
+		}
+
+		//this.EnableGyro();
+		this.EnableGyroNorm();
+
 	}
 
 	function SetElementText(Element,Text)

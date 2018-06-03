@@ -284,6 +284,38 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		Element.innerText = Text;
 	}
 
+
+
+	function TPlaylist(Texture)
+	{
+		this.Texture = Texture;
+		this.Urls = [];
+		this.CurrentIndex = null;
+		
+		this.Add = function(Url,Name)
+		{
+			this.Urls.push( { url:Url, name:Name } );
+		}
+		this.ShowFirst = function()
+		{
+			this.Show(0);
+		}
+		this.ShowLast = function()
+		{
+			this.Show( this.Urls.length-1 );
+		}
+		this.ShowNext = function()
+		{
+			this.Show( this.CurrentIndex+1 );
+		}
+		this.Show = function(Index)
+		{
+			this.CurrentIndex = Index % this.Urls.length;
+			let CurrentUrl = this.Urls[this.CurrentIndex];
+			this.Texture.Load( CurrentUrl.url, CurrentUrl.name );
+		}
+	}
+
 	function main()
 	{
 		var Canvas = document.getElementById('glcanvas');
@@ -325,16 +357,23 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		ResizeCanvas();
 		
 		
+		let PanoTexture = new TTexture('Pano');
+		let Playlist = new TPlaylist(PanoTexture);
+		Playlist.Add('http://stereo360.newchromantics.com/Images/Test360.jpg');
+		Playlist.Add('http://stereo360.newchromantics.com/Images/cam1_s.jpg');
+		Playlist.ShowFirst();
+		
+		Canvas.addEventListener('click', Playlist.ShowNext.bind(Playlist), false);
+
+		
 		let ClearColour = new float4(0,0,0,1);
-		let PanoUrl = 'http://stereo360.newchromantics.com/Images/cam1_s.jpg';
-		//let PanoUrl = 'http://stereo360.newchromantics.com/Images/Test360.jpg';
-		let PanoTexture = new TTexture('Pano',PanoUrl);
 		let Stereo360Blitter = new TBlitter('Blitter', FragShader_Stereo360 );
 		let Camera = new TCamera();
 
 		function LoadPanoImage(Url,Name)
 		{
-			PanoTexture.Load(Url,Name);
+			Playlist.Add( Url, Name );
+			Playlist.ShowLast();
 		}
 
 		//	enable drag & drop

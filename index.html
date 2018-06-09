@@ -16,7 +16,7 @@
 		overflow:			hidden;
 		}
 	
-	#GyroDebug
+	#Debug
 	{
 		padding:	1vmin;
 		background:	#fff;
@@ -24,22 +24,35 @@
 		top:		0vmin;
 		left:		10vmin;
 		right:		90vmin;
-		height:		10vmin;
+		height:		20vmin;
 		width:		80vmin;
-		font-size:	8vmin;
+		font-size:	5vmin;
+	}
+	
+	#EnableWebVrButton
+	{
+		background: green;
+		color:		white;
+		cursor:		hand;
 	}
 	
 	</style>
 </head>
 <body>
+	<script src="PopWebgl/PopBrowser.js"></script>
 	<script src="PopWebgl/PopGl.js"></script>
+	<script src="PopWebgl/PopWebvr.js"></script>
 	<script src="PopWebgl/PopBlitter.js"></script>
 	<script src="PopWebgl/gl-matrix.js"></script>
 	<script src="PopWebgl/PopMath.js"></script>
 	<script src="PopWebgl/gyronorm.complete.js"></script>
-	
+	<script src="PopWebgl/webvr-polyfill.js"></script>
 
+<div id=Debug>
+	<div id=EnableWebVrButton>Enable WebVr</div>
+	<div id=WebvrDebug>Webvr.</div>
 	<div id=GyroDebug>Gyro.</div>
+</div>
 	<canvas id="glcanvas" width="100" height="100">
 		Your browser doesn't appear to support the HTML5 <code>&lt;canvas&gt;</code> element.
 	</canvas>
@@ -375,13 +388,41 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		}
 	}
 
+	function SetEnableWebvrButton(OnClick)
+	{
+		let EnableVrButton = document.getElementById('EnableWebVrButton');
+		EnableVrButton.style.visibility = 'visible';
+		EnableVrButton.onclick = OnClick;
+	}
+
 	function main()
 	{
+		DisableTouchScroll();
+		
 		var Canvas = document.getElementById('glcanvas');
-		var Context = new TContext( Canvas );
+		
+		var OnDisplaysChanged = function(Displays)
+		{
+			//	show buttons
+			let EnumDisplay = function(Display)
+			{
+				let EnableWebVr = function()
+				{
+					Display.Enable(Canvas);
+				}
+				SetEnableWebvrButton( EnableWebVr );
+				SetElementText('WebvrDebug','got webvr display x' + Displays.length );
+			}
+			Displays.forEach( EnumDisplay );
+		}
+		
+		let PreserveDrawingBuffer = false;
+		var Context = new TContext( Canvas, PreserveDrawingBuffer );
+		
 		var ScreenLeft = new TScreen( Canvas, MinMax_Left );
 		var ScreenRight = new TScreen( Canvas, MinMax_Right );
 		var ScreenFull = new TScreen( Canvas );
+		
 		var CameraController = new TCameraController( Canvas );
 
 		let UpdateGyroText = function()
@@ -392,6 +433,22 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 			else
 				SetElementText('GyroDebug', GyroEular.x.toFixed(2) + ', ' + GyroEular.y.toFixed(2) + ', ' + GyroEular.z.toFixed(2) );
 		}
+		
+		try
+		{
+			let Config = {};
+			var WebvrPolyfill = new WebVRPolyfill(Config);
+			var Webvr = new TWebVr(OnDisplaysChanged);
+		}
+		catch(Exception)
+		{
+			console.log(Exception);
+			OnDisplaysChanged( [] );
+		}
+		
+
+		
+		
 
 //	force 1:1 ratio
 		Screen.GetWidth = function()
@@ -505,10 +562,18 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 			
 			let PanoUvs = GetPanoMinMaxUvsFromFilename( PanoTexture.GetFilenameNoExtension() );
 			//let RenderStereo = PanoUvs.length > 1;
-			let RenderStereo = IsLandscape();
+			//let RenderStereo = IsLandscape();
+			let Screens = Webvr.GetScreens();
 			
 			try
 			{
+				let RenderScreen = function(Screen)
+				{
+					Stereo360Blitter.Render( Screen, SetStereoUniforms );
+				}
+			
+				Screens.forEach( RenderScreen );
+				/*
 				if ( RenderStereo )
 				{
 					Stereo360Blitter.Render( ScreenLeft, SetStereoUniforms );
@@ -518,6 +583,7 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 				{
 					Stereo360Blitter.Render( ScreenFull, SetStereoUniforms );
 				}
+				*/
 			}
 			catch(Exception)
 			{

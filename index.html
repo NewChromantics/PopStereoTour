@@ -399,6 +399,7 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 	{
 		DisableTouchScroll();
 		
+		var Render = function(){};
 		var Canvas = document.getElementById('glcanvas');
 		
 		var OnDisplaysChanged = function(Displays)
@@ -409,6 +410,7 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 				let EnableWebVr = function()
 				{
 					Display.Enable(Canvas);
+					Display.Render( Render );
 				}
 				SetEnableWebvrButton( EnableWebVr );
 				SetElementText('WebvrDebug','got webvr display x' + Displays.length );
@@ -416,12 +418,15 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 			Displays.forEach( EnumDisplay );
 		}
 		
-		let PreserveDrawingBuffer = false;
+		let PreserveDrawingBuffer = true;
 		var Context = new TContext( Canvas, PreserveDrawingBuffer );
 		
+		var ScreenLeft = null;
+		var ScreenRight = null;
+		/*
 		var ScreenLeft = new TScreen( Canvas, MinMax_Left );
 		var ScreenRight = new TScreen( Canvas, MinMax_Right );
-		var ScreenFull = new TScreen( Canvas );
+		*/var ScreenFull = new TScreen( Canvas );
 		
 		var CameraController = new TCameraController( Canvas );
 
@@ -444,20 +449,6 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		{
 			console.log(Exception);
 			OnDisplaysChanged( [] );
-		}
-		
-
-		
-		
-
-//	force 1:1 ratio
-		Screen.GetWidth = function()
-		{
-			return Math.max( this.CanvasElement.width, this.CanvasElement.height );
-		}
-		Screen.GetHeight = function()
-		{
-			return Math.max( this.CanvasElement.width, this.CanvasElement.height );
 		}
 
 		var ResizeCanvas = function()
@@ -482,7 +473,7 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		Canvas.addEventListener('click', Playlist.ShowNext.bind(Playlist), false);
 
 		
-		let ClearColour = new float4(0,0,0,1);
+		let ClearColour = new float4(0,1,0,1);
 		let Stereo360Blitter = new TBlitter('Blitter', FragShader_Stereo360 );
 		let Camera = new TCamera();
 
@@ -552,52 +543,54 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 			Shader.SetUniform( 'PanoMinMax', PanoMinMax );
 		};
 		
-		var Time = 0;
-		function Render()
+		function TBasicDisplay()
 		{
+			this.Screens = [ScreenFull];
+			
+			this.Render = function(OnDraw)
+			{
+				let DrawScreens = function(Time)
+				{
+					try
+					{
+						OnDraw( this.Screens, Time );
+					}
+					catch(Exception)
+					{
+						//	rethrow
+						throw Exception;
+					}
+					finally
+					{
+						this.Render( OnDraw );
+					}
+				};
+				requestAnimationFrame( DrawScreens.bind(this) );
+			}
+		}
+		let BasicDisplay = new TBasicDisplay();
+		
+		
+		Render = function(Screens,Time)
+		{
+			Context.Clear(ClearColour);
 			UpdateGyroText();
-			Time += 1.0 / 60.0;
 			//Camera.RotationEularDegrees.x = Math.sin( Time ) * 10;
 			//Camera.RotationEularDegrees.y += 0.2;
 			
 			let PanoUvs = GetPanoMinMaxUvsFromFilename( PanoTexture.GetFilenameNoExtension() );
 			//let RenderStereo = PanoUvs.length > 1;
 			//let RenderStereo = IsLandscape();
-			let Screens = Webvr.GetScreens();
 			
-			try
+			let RenderScreen = function(Screen)
 			{
-				let RenderScreen = function(Screen)
-				{
-					Stereo360Blitter.Render( Screen, SetStereoUniforms );
-				}
-			
-				Screens.forEach( RenderScreen );
-				/*
-				if ( RenderStereo )
-				{
-					Stereo360Blitter.Render( ScreenLeft, SetStereoUniforms );
-					Stereo360Blitter.Render( ScreenRight, SetStereoUniforms );
-				}
-				else
-				{
-					Stereo360Blitter.Render( ScreenFull, SetStereoUniforms );
-				}
-				*/
+				Stereo360Blitter.Render( Screen, SetStereoUniforms );
 			}
-			catch(Exception)
-			{
-				//	rethrow
-				throw Exception;
-			}
-			finally
-			{
-				//	always request redraw
-				requestAnimationFrame( Render );
-			}
+			Screens.forEach( RenderScreen );
 		}
 
-		Render();
+		//	start render loop
+		BasicDisplay.Render( Render );
 	}
 
 

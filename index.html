@@ -34,6 +34,7 @@
 		background: green;
 		color:		white;
 		cursor:		hand;
+		visibility:	hidden;
 	}
 	
 	</style>
@@ -50,8 +51,8 @@
 
 <div id=Debug>
 	<div id=EnableWebVrButton>Enable WebVr</div>
-	<div id=WebvrDebug>Webvr.</div>
-	<div id=GyroDebug>Gyro.</div>
+	<div id=WebvrDebug>Webvr?</div>
+	<div id=GyroDebug>Gyro?</div>
 </div>
 	<canvas id="glcanvas" width="100" height="100">
 		Your browser doesn't appear to support the HTML5 <code>&lt;canvas&gt;</code> element.
@@ -123,6 +124,18 @@ vec2 ScaleMinMax(vec2 uv,vec4 MinMax)
 
 void main()
 {
+	/*
+	if ( PanoMinMax.x < 0.5 )
+	{
+		gl_FragColor = vec4(1.0,0.0,0.0,1.0);
+		return;
+	}
+	else
+	{
+		gl_FragColor = vec4(0.0,0.0,1.0,1.0);
+		return;
+	}
+	 */
 	//	projection space is -1..1
 	vec2 Screen2 = mix( vec2(-1,1), vec2(1,-1), uv );
 	//vec2 Screen2 = mix( vec2(0,0), vec2(1,1), uv );
@@ -342,7 +355,7 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		}
 
 		//this.EnableGyro();
-		this.EnableGyroNorm();
+		//this.EnableGyroNorm();
 
 	}
 
@@ -395,6 +408,18 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		EnableVrButton.onclick = OnClick;
 	}
 
+	//	for all temporary workarounds
+	function IsWebVrActive()
+	{
+		return true;
+	}
+
+	function isIOS()
+	{
+		var isIOS = /iPad|iPhone|iPod/.test(navigator.platform);
+		return isIOS;
+	}
+
 	function main()
 	{
 		DisableTouchScroll();
@@ -426,7 +451,7 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		/*
 		var ScreenLeft = new TScreen( Canvas, MinMax_Left );
 		var ScreenRight = new TScreen( Canvas, MinMax_Right );
-		*/var ScreenFull = new TScreen( Canvas );
+		*/var ScreenFull = new TScreen( "FullSize", Canvas );
 		
 		var CameraController = new TCameraController( Canvas );
 
@@ -451,17 +476,53 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 			OnDisplaysChanged( [] );
 		}
 
-		var ResizeCanvas = function()
+		var ResizeCanvas = function(Forced)
 		{
 			console.log("ResizeCanvas");
+			
+			let Debug = Canvas.width + "x" + Canvas.height + " -> " + window.innerWidth + "x" + window.innerHeight;
+			SetElementText('GyroDebug',Debug);
+			
 			Canvas.width = window.innerWidth;
-			//	gr: where did this border come from?
-			Canvas.height = window.innerHeight+4;
+			Canvas.height = window.innerHeight;
+		}
+		
+		var ResizeDelay = null;
+		var OnResizeCanvas = function(Forced)
+		{
+			if ( Forced === true )
+			{
+				ResizeCanvas();
+				return;
+			}
+			
+			//	delay resize for IOS
+			if ( !ResizeDelay )
+			{
+				let OnResizeDeffered = function()
+				{
+					ResizeDelay = null;
+					
+					if ( isIOS() )
+					{
+						//ResizeCanvas();
+					}
+					else if ( IsWebVrActive() )
+					{
+						//	the polyfill (not sure about others) doesn't cope well with resizing the canvas
+					}
+					else
+					{
+						ResizeCanvas();
+					}
+				}
+				ResizeDelay = setTimeout(OnResizeDeffered,250);
+			}
 		}
 
 		// resize the canvas to fill browser window dynamically
-		window.addEventListener('resize', ResizeCanvas, false);
-		ResizeCanvas();
+		window.addEventListener('resize', OnResizeCanvas, false);
+		ResizeCanvas(true);
 		
 		
 		let PanoTexture = new TTexture('Pano');
@@ -473,8 +534,8 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		Canvas.addEventListener('click', Playlist.ShowNext.bind(Playlist), false);
 
 		
-		let ClearColour = new float4(0,1,0,1);
-		let Stereo360Blitter = new TBlitter('Blitter', FragShader_Stereo360 );
+		let ClearColour = new float4(1,0,1,1);
+		let Stereo360Blitter = new TBlitter('Blitter', FragShader_Stereo360, Context );
 		let Camera = new TCamera();
 
 		function LoadPanoImage(Url,Name)
@@ -527,10 +588,14 @@ const MinMax_Bottom = new float4(0,0.5,1.0,1.0);
 		{
 			let PanoUvs = GetPanoMinMaxUvsFromFilename( PanoTexture.GetFilenameNoExtension() );
 			let PanoMinMax = PanoUvs[0];
-			if ( RenderTarget == ScreenRight )
+			if ( RenderTarget.GetName().includes('Right') )
 				PanoMinMax = PanoUvs[PanoUvs.length-1];
-			
-			let ViewToWorldMatrix = CameraController.GetRotation().GetMatrix4x4();
+
+			//let Rotation = CameraController.GetRotation();
+			let Rotation = RenderTarget.Rotation;
+			if ( Rotation === undefined )
+				Rotation = new Quaternion();
+			let ViewToWorldMatrix = Rotation.GetMatrix4x4();
 			let WorldToViewMatrix = ViewToWorldMatrix.GetInverse();
 			
 			let ViewToScreenMatrix = Camera.GetViewToScreenMatrix(RenderTarget);
